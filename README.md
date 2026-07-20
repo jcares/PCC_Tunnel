@@ -170,6 +170,14 @@ ghcr.io/jcares/pcc-tunnel-client:latest
 
 GitHub debe tener habilitado **Settings → Actions → General → Workflow permissions → Read and write permissions**. El primer uso puede requerir cambiar la visibilidad de los paquetes desde la sección **Packages** del perfil de GitHub.
 
+Si el workflow todavía no se ha ejecutado, se pueden crear los paquetes manualmente desde un equipo con Docker y PowerShell. Crea un token personal de GitHub con `write:packages` y ejecútalo sin guardarlo en el repositorio:
+
+```powershell
+. .\publish-images.ps1
+```
+
+El script [`publish-images.ps1`](publish-images.ps1) usa `jcares` por defecto, solicita el token de GitHub de forma oculta y construye y publica las dos imágenes. Después de publicarlas, cambia sus paquetes a **Public** desde **Profile → Packages → Package settings** para que CasaOS pueda descargarlas sin autenticación.
+
 ## CasaOS
 
 Para desplegar en CasaOS:
