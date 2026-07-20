@@ -2,19 +2,14 @@ services:
   gateway:
     image: ghcr.io/jcares/pcc-tunnel-gateway:latest
     ports:
-      - "8080:8080"
+      - "8082:8080"
       - "8081:8081"
     environment:
       PCC_CONTROL_ADDR: ":8080"
       PCC_PUBLIC_ADDR: ":8081"
-      PCC_AUTH_TOKEN: "${PCC_AUTH_TOKEN:?PCC_AUTH_TOKEN must be set}"
+      PCC_AUTH_TOKEN: "CHANGE_ME_TO_A_SECURE_TOKEN"
       PCC_LOG_FILE: "/app/logs/gateway.log"
     restart: always
-    healthcheck:
-      test: ["CMD", "sh", "-c", "echo > /dev/tcp/localhost/8080"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   client:
     image: ghcr.io/jcares/pcc-tunnel-client:latest
@@ -22,5 +17,4 @@ services:
       PCC_GATEWAY_ADDR: "gateway:8080"
     restart: always
     depends_on:
-      gateway:
-        condition: service_healthy
+      - gateway

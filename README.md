@@ -172,25 +172,20 @@ GitHub debe tener habilitado **Settings → Actions → General → Workflow per
 
 ## CasaOS
 
-Para usar el Compose localmente en CasaOS:
+Para desplegar en CasaOS:
 
 1. Copiar el proyecto al servidor CasaOS.
 2. Abrir una terminal en el servidor y situarse en la carpeta del proyecto.
-3. Definir un token seguro y levantar los servicios:
+3. Antes de importar el archivo, cambiar `CHANGE_ME_TO_A_SECURE_TOKEN` por un token seguro en `PCC_AUTH_TOKEN`.
+4. Importar [`docker-compose.ghcr.yml`](docker-compose.ghcr.yml) desde **App Store → Custom Install → Import**.
+
+También se puede iniciar desde una terminal después de editar el token:
 
 ```bash
-export PCC_AUTH_TOKEN='cambia-este-token'
-docker compose up --build -d
-```
-
-Para usar las imágenes publicadas desde CasaOS, importar [`docker-compose.ghcr.yml`](docker-compose.ghcr.yml) desde **App Store → Custom Install → Import**. También se puede iniciar desde una terminal:
-
-```bash
-export PCC_AUTH_TOKEN='cambia-este-token'
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-No se deben rellenar **Imagen Docker** y **Tag** con valores inventados en el instalador de contenedor individual.
+El Compose de CasaOS usa únicamente `image:`; no incluye `build:`, montajes de volumen ni interpolaciones de variables que CasaOS pueda interpretar incorrectamente. No se deben rellenar **Imagen Docker** y **Tag** con valores inventados en el instalador de contenedor individual.
 
 Definir redirección de puertos en el router si se accede desde Internet.
 
