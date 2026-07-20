@@ -164,8 +164,8 @@ El workflow [`docker-publish.yml`](.github/workflows/docker-publish.yml) constru
 Las imágenes quedan disponibles como:
 
 ```text
-ghcr.io/USUARIO/REPOSITORIO-gateway:latest
-ghcr.io/USUARIO/REPOSITORIO-client:latest
+ghcr.io/jcares/pcc-tunnel-gateway:latest
+ghcr.io/jcares/pcc-tunnel-client:latest
 ```
 
 GitHub debe tener habilitado **Settings → Actions → General → Workflow permissions → Read and write permissions**. El primer uso puede requerir cambiar la visibilidad de los paquetes desde la sección **Packages** del perfil de GitHub.
@@ -183,14 +183,14 @@ export PCC_AUTH_TOKEN='cambia-este-token'
 docker compose up --build -d
 ```
 
-Para usar las imágenes publicadas desde CasaOS, sustituir `build:` en `docker-compose.yml` por estas líneas, cambiando `USUARIO/REPOSITORIO` por los valores reales:
+Para usar las imágenes publicadas desde CasaOS, sustituir `build:` en `docker-compose.yml` por estas líneas:
 
 ```yaml
 gateway:
-  image: ghcr.io/USUARIO/REPOSITORIO-gateway:latest
+  image: ghcr.io/jcares/pcc-tunnel-gateway:latest
 
 client:
-  image: ghcr.io/USUARIO/REPOSITORIO-client:latest
+  image: ghcr.io/jcares/pcc-tunnel-client:latest
 ```
 
 Después se puede importar ese Compose desde **App Store → Custom Install → Import**. No se deben rellenar **Imagen Docker** y **Tag** con valores inventados en el instalador de contenedor individual.
