@@ -183,17 +183,14 @@ export PCC_AUTH_TOKEN='cambia-este-token'
 docker compose up --build -d
 ```
 
-Para usar las imágenes publicadas desde CasaOS, sustituir `build:` en `docker-compose.yml` por estas líneas:
+Para usar las imágenes publicadas desde CasaOS, importar [`docker-compose.ghcr.yml`](docker-compose.ghcr.yml) desde **App Store → Custom Install → Import**. También se puede iniciar desde una terminal:
 
-```yaml
-gateway:
-  image: ghcr.io/jcares/pcc-tunnel-gateway:latest
-
-client:
-  image: ghcr.io/jcares/pcc-tunnel-client:latest
+```bash
+export PCC_AUTH_TOKEN='cambia-este-token'
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-Después se puede importar ese Compose desde **App Store → Custom Install → Import**. No se deben rellenar **Imagen Docker** y **Tag** con valores inventados en el instalador de contenedor individual.
+No se deben rellenar **Imagen Docker** y **Tag** con valores inventados en el instalador de contenedor individual.
 
 Definir redirección de puertos en el router si se accede desde Internet.
 
