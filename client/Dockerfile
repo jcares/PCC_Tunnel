@@ -9,4 +9,6 @@ FROM alpine:3.20
 WORKDIR /app
 COPY --from=build /out/pcc-client /app/pcc-client
 COPY config /app/config
+RUN mkdir -p /app/logs
+ENV PCC_GATEWAY_ADDR=
 ENTRYPOINT ["/app/pcc-client"]

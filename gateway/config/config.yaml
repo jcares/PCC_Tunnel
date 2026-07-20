@@ -2,3 +2,8 @@ server:
   control_address: ":8080"
   public_address: ":8081"
   auth_token: ""
+  heartbeat_timeout: 15
+
+log:
+  level: "info"
+  file: "logs/gateway.log"

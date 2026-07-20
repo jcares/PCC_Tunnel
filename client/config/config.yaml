@@ -1,26 +1,19 @@
 server:
-
   url: "127.0.0.1:8080"
 
-
-
 client:
-
+  id: "cliente-01"
   name: "cliente-01"
-
   token: ""
-
   reconnect: 5
   heartbeat: 5
 
-
-
 proxy:
-
   local: "http://127.0.0.1:80"
 
-
-
 ssl:
-
   verify: false
+
+log:
+  level: "info"
+  file: "logs/client.log"

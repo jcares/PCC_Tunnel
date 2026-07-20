@@ -1,25 +1,49 @@
-# PCC_Tunnel Client
+# PCC_Tunnel — Cliente
 
-El Cliente se ejecuta dentro de la red privada y mantiene una conexión saliente persistente con el Gateway.
+El Cliente es un agente que se ejecuta dentro de la red privada y mantiene una conexión saliente persistente con el Gateway.
 
-## Configuración
+## Responsabilidades
 
-Archivo: `client/config/config.yaml`
+- Conectar al Gateway y completar el handshake de registro.
+- Enviar heartbeat periódico para mantener la sesión viva.
+- Reconectarse automáticamente con backoff progresivo si la conexión se pierde.
+- Abrir conexiones TCP al servicio local para cada `OPEN_STREAM` recibido.
+- Reenviar datos en ambas direcciones entre el Gateway y el servicio local.
 
-- `server.url`: dirección TCP del control del Gateway.
-- `client.name`: nombre del agente.
-- `client.token`: token que debe coincidir con `PCC_AUTH_TOKEN`.
-- `client.reconnect`: segundos iniciales entre reintentos.
-- `client.heartbeat`: intervalo de `PING/PONG`.
-- `proxy.local`: servicio TCP local que recibirá cada stream.
+## Configuración: `client/config/config.yaml`
 
-`PCC_GATEWAY_ADDR` puede sobrescribir `server.url`, especialmente dentro de Compose.
+| Campo | Descripción | Defecto |
+|---|---|---|
+| `server.url` | Dirección TCP del control del Gateway | — (requerido) |
+| `client.id` | Identificador único del cliente | igual que `name` |
+| `client.name` | Nombre del agente | — (requerido) |
+| `client.token` | Token que debe coincidir con `PCC_AUTH_TOKEN` | `""` (sin auth) |
+| `client.reconnect` | Segundos iniciales entre reintentos | `5` |
+| `client.heartbeat` | Intervalo de PING/PONG en segundos | `5` |
+| `proxy.local` | Servicio TCP local a exponer | `http://127.0.0.1:80` |
+| `log.file` | Ruta del archivo de log | `logs/client.log` |
+
+`PCC_GATEWAY_ADDR` sobreescribe `server.url` (útil en Docker Compose).
+
+## Compilación
+
+```powershell
+cd client
+go mod tidy
+go build -o pcc-client.exe .
+```
 
 ## Ejecución
 
 ```powershell
 cd client
-go run .
+.\pcc-client.exe
 ```
 
-El Cliente conecta, registra su identidad, procesa `OPEN_STREAM`, conecta al servicio local y reenvía datos en ambas direcciones.
+## Reconexión automática
+
+El cliente espera `reconnect` segundos entre reintentos y duplica el delay cada vez hasta un máximo de 60 segundos. Al reconectarse exitosamente, el delay se resetea al valor inicial.
+
+## Logs
+
+Los logs se escriben en consola y en el archivo `log.file`. Niveles usados: `[INFO]`, `[WARN]`, `[DEBUG]`, `[ERROR]`.

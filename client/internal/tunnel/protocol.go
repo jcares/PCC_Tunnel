@@ -13,6 +13,7 @@ const (
 
 type Message struct {
 	Type     string `json:"type"`
+	ID       string `json:"id,omitempty"`
 	Name     string `json:"name,omitempty"`
 	Token    string `json:"token,omitempty"`
 	Data     string `json:"data,omitempty"`
