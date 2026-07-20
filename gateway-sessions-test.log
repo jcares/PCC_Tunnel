@@ -1,0 +1,7 @@
+PCC_Tunnel Gateway
+Listening :8080
+Active clients: 1
+Client connected: cliente-01
+Heartbeat: cliente-01
+Client disconnected: cliente-01
+Active clients: 0

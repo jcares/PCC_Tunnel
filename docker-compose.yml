@@ -1,0 +1,24 @@
+services:
+  gateway:
+    build:
+      context: ./gateway
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      PCC_CONTROL_ADDR: ":8080"
+      PCC_PUBLIC_ADDR: ":8081"
+      PCC_AUTH_TOKEN: ""
+    restart: always
+    volumes:
+      - gateway-logs:/app/logs
+
+  client:
+    build:
+      context: ./client
+    environment:
+      PCC_GATEWAY_ADDR: "gateway:8080"
+    restart: always
+
+volumes:
+  gateway-logs:
