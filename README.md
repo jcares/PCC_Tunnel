@@ -150,7 +150,7 @@ Ejecutar desde la raíz del proyecto:
 docker compose up --build
 ```
 
-El Compose levanta Gateway y Cliente con reinicio automático, volúmenes de logs y healthcheck en el control del Gateway.
+El Compose levanta Gateway y Cliente con reinicio automático y healthcheck en el control del Gateway. Los logs se consultan con `docker logs`.
 
 **Antes de usar en producción:**
 - Definir `PCC_AUTH_TOKEN` con un valor secreto seguro.
