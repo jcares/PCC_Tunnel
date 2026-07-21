@@ -17,6 +17,9 @@ func main() {
 	if gatewayAddress := os.Getenv("PCC_GATEWAY_ADDR"); gatewayAddress != "" {
 		cfg.Server.URL = gatewayAddress
 	}
+	if token := os.Getenv("PCC_AUTH_TOKEN"); token != "" {
+		cfg.Client.Token = token
+	}
 
 	logger, closeLog, err := newLogger(cfg.Log.File)
 	if err != nil {
