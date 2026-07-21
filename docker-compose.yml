@@ -1,20 +1,16 @@
 services:
-  gateway:
-    image: ghcr.io/jcares/pcc-tunnel-gateway:latest
-    ports:
-      - "8082:8080"
-      - "8081:8081"
-    environment:
-      PCC_CONTROL_ADDR: ":8080"
-      PCC_PUBLIC_ADDR: ":8081"
-      PCC_AUTH_TOKEN: "CHANGE_ME_TO_A_SECURE_TOKEN"
-      PCC_LOG_FILE: "/app/logs/gateway.log"
-    restart: always
-
   client:
-    image: ghcr.io/jcares/pcc-tunnel-client:latest
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
-      PCC_GATEWAY_ADDR: "gateway:8080"
-    restart: always
-    depends_on:
-      - gateway
+      PCC_SERVER_URL: ${PCC_SERVER_URL:-https://tudominio.example/api}
+      PCC_AUTH_TOKEN: ${PCC_AUTH_TOKEN:-}
+      PCC_REGISTRATION_KEY: ${PCC_REGISTRATION_KEY:-}
+      PCC_PROXY_LOCAL: ${PCC_PROXY_LOCAL:-http://host.docker.internal:80}
+    volumes:
+      - ./client/config:/app/config:ro
+      - ./client/logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -20,11 +20,12 @@ type ServerConfig struct {
 }
 
 type ClientConfig struct {
-	ID        string `yaml:"id"`
-	Name      string `yaml:"name"`
-	Token     string `yaml:"token"`
-	Reconnect int    `yaml:"reconnect"`
-	Heartbeat int    `yaml:"heartbeat"`
+	ID              string `yaml:"id"`
+	Name            string `yaml:"name"`
+	Token           string `yaml:"token"`
+	RegistrationKey string `yaml:"registration_key"`
+	Reconnect       int    `yaml:"reconnect"`
+	Heartbeat       int    `yaml:"heartbeat"`
 }
 
 type ProxyConfig struct {
@@ -41,33 +42,17 @@ type LogConfig struct {
 }
 
 func Load(path string) (*Config, error) {
-
 	data, err := os.ReadFile(path)
-
 	if err != nil {
-		return nil, fmt.Errorf(
-			"no se pudo leer config: %w",
-			err,
-		)
+		return nil, fmt.Errorf("no se pudo leer config: %w", err)
 	}
-
 	cfg := &Config{}
-
-	err = yaml.Unmarshal(data, cfg)
-
-	if err != nil {
-		return nil, fmt.Errorf(
-			"error leyendo yaml: %w",
-			err,
-		)
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("error leyendo yaml: %w", err)
 	}
-
 	if cfg.Server.URL == "" {
-		return nil, fmt.Errorf(
-			"server.url no definido",
-		)
+		return nil, fmt.Errorf("server.url no definido")
 	}
-
 	if cfg.Client.ID == "" {
 		cfg.Client.ID = cfg.Client.Name
 	}
@@ -77,19 +62,14 @@ func Load(path string) (*Config, error) {
 	if cfg.Proxy.Local == "" {
 		cfg.Proxy.Local = "http://127.0.0.1:80"
 	}
-	if cfg.Log.Level == "" {
-		cfg.Log.Level = "info"
-	}
 	if cfg.Log.File == "" {
 		cfg.Log.File = "logs/client.log"
 	}
-
 	if cfg.Client.Reconnect <= 0 {
 		cfg.Client.Reconnect = 5
 	}
 	if cfg.Client.Heartbeat <= 0 {
 		cfg.Client.Heartbeat = 5
 	}
-
 	return cfg, nil
 }

@@ -1,210 +1,60 @@
 # PCC_Tunnel
 
-Sistema de túnel inverso TCP para publicar servicios internos detrás de CGNAT. Similar a Cloudflare Tunnel / ngrok, permite que un cliente en una red privada exponga servicios locales a través de un Gateway público.
+Sistema de túnel inverso autohospedado sobre HTTPS. Permite publicar servicios locales detrás de CGNAT usando únicamente un hosting compartido con cPanel (PHP + MySQL) y un cliente Go en la red privada. No requiere VPS, Docker en el servidor, ni herramientas de terceros (Cloudflare Tunnel, ngrok, Tailscale o FRP).
 
 ## Arquitectura
 
 ```
 Usuario externo
-      |
-Gateway :8081 (público)
-      |
-Canal persistente :8080 (control)
-      |
-Cliente (red privada)
-      |
-Servicio local (127.0.0.1:80 u otro)
+     │
+     ▼
+Dominio (HTTPS)
+     │
+     ▼
+Hosting compartido — PHP 8.x / Apache / LiteSpeed
+     │
+     ▼
+API REST MySQL  ──── Long Polling ────► Cliente Go
+                                              │
+                                              ▼
+                                       Servicio local
+                                     (CasaOS / Docker)
 ```
+
+No existe ningún gateway TCP. El servidor es PHP puro. El cliente Go hace polling HTTPS y ejecuta las solicitudes contra el servicio local.
 
 ## Componentes
 
-| Componente | Ubicación | Rol |
+| Componente | Ubicación | Descripción |
 |---|---|---|
-| Gateway | `gateway/` | Servidor central; acepta conexiones públicas y clientes |
-| Cliente | `client/` | Agente en red privada; mantiene sesión persistente con Gateway |
-| Panel | `panel/` | Panel administrativo PHP (base para futuras etapas) |
+| Servidor PHP | `api/` | Control plane: colas, autenticación, heartbeat |
+| Clases PHP | `Classes/` | Modelos, autenticación, controladores |
+| Base de datos | `database/` | Migraciones y script de instalación |
+| Panel Web | `panel/` | Administración: clientes, logs, dominios, usuarios |
+| Cliente Go | `client/` | Agente local: polling, proxy HTTP, reconexión |
 
-## Funcionalidades implementadas
+## Instalación rápida
 
-- Handshake JSON `HELLO` / `SERVER_OK` con ID, nombre y token.
-- Autenticación mediante token configurable (`PCC_AUTH_TOKEN`).
-- Heartbeat `PING` / `PONG` con timeout configurable.
-- Reconexión automática con backoff progresivo (hasta 60 s).
-- Registro de clientes con ID, nombre, IP, estado y último heartbeat.
-- Multiplexación de streams (`OPEN_STREAM`, `DATA`, `CLOSE_STREAM`).
-- Forwarding TCP completo hacia servicio local configurable.
-- Logs persistentes en `logs/` con niveles info / warn / debug / error.
-- Dockerfiles multi-stage y Compose con volúmenes y healthcheck.
+Ver [`INSTALL.md`](INSTALL.md) para instrucciones completas de cPanel, CasaOS y compilación.
 
-## Compilación local
+## Documentación
 
-```powershell
-cd gateway
-go mod tidy
-go build -o pcc-gateway.exe .
-
-cd ..\client
-go mod tidy
-go build -o pcc-client.exe .
-```
-
-## Ejecución local
-
-**Terminal 1 — Gateway:**
-
-```powershell
-$env:PCC_AUTH_TOKEN = ""
-cd gateway
-.\pcc-gateway.exe
-```
-
-Salida esperada:
-```
-[INFO] PCC_Tunnel Gateway
-[INFO] Listening control :8080
-[INFO] Listening public :8081
-```
-
-**Terminal 2 — Cliente:**
-
-```powershell
-cd client
-.\pcc-client.exe
-```
-
-Salida esperada:
-```
-[INFO] PCC_Tunnel Client
-[INFO] Connected Gateway
-[INFO] Client registered
-```
-
-## Configuración
-
-### Gateway: `gateway/config/config.yaml`
-
-```yaml
-server:
-  control_address: ":8080"
-  public_address: ":8081"
-  auth_token: ""
-  heartbeat_timeout: 15    # segundos máximos sin PING antes de desconectar
-
-log:
-  level: "info"
-  file: "logs/gateway.log"
-```
-
-Variables de entorno (Docker) sobreescriben el YAML:
-
-| Variable | Descripción |
+| Documento | Descripción |
 |---|---|
-| `PCC_CONTROL_ADDR` | Dirección de escucha del control |
-| `PCC_PUBLIC_ADDR` | Dirección de escucha pública |
-| `PCC_AUTH_TOKEN` | Token de autenticación |
-| `PCC_LOG_FILE` | Ruta del archivo de log |
+| [`CLIENT.md`](CLIENT.md) | Configuración y uso del cliente Go |
+| [`SERVER.md`](SERVER.md) | Descripción del servidor PHP |
+| [`API.md`](API.md) | Protocolo de comunicación |
+| [`INSTALL.md`](INSTALL.md) | Instalación paso a paso |
+| [`ROADMAP.md`](ROADMAP.md) | Funcionalidades planificadas |
 
-### Cliente: `client/config/config.yaml`
+## Requisitos
 
-```yaml
-server:
-  url: "127.0.0.1:8080"
+### Servidor (hosting compartido)
+- PHP 8.1+ con extensiones `pdo_mysql`, `openssl`, `hash`, `json`
+- MySQL 5.7+ / MariaDB 10.5+
+- Apache con `mod_rewrite` o LiteSpeed
 
-client:
-  id: "cliente-01"
-  name: "cliente-01"
-  token: ""
-  reconnect: 5      # segundos iniciales entre reintentos
-  heartbeat: 5      # intervalo de PING/PONG
-
-proxy:
-  local: "http://127.0.0.1:80"
-
-log:
-  level: "info"
-  file: "logs/client.log"
-```
-
-Variable de entorno que sobreescribe `server.url`:
-
-```
-PCC_GATEWAY_ADDR=gateway:8080
-```
-
-## Pruebas PowerShell
-
-Ejecutar desde la raíz del proyecto:
-
-```powershell
-. .\test_handshake.ps1
-. .\test_heartbeat.ps1
-. .\test_sessions.ps1
-. .\test_forwarding.ps1
-```
-
-`test_forwarding.ps1` incluye un echo server interno; no requiere un servicio externo activo.
-
-## Docker
-
-```powershell
-docker compose up --build
-```
-
-El Compose levanta Gateway y Cliente con reinicio automático y healthcheck en el control del Gateway. Los logs se consultan con `docker logs`.
-
-**Antes de usar en producción:**
-- Definir `PCC_AUTH_TOKEN` con un valor secreto seguro.
-- Colocar un proxy inverso (nginx / Caddy) con TLS delante del puerto público.
-- Revisar puertos expuestos según el firewall del servidor.
-
-## Publicar imágenes en GitHub Container Registry
-
-El workflow [`docker-publish.yml`](.github/workflows/docker-publish.yml) construye y publica automáticamente las imágenes en GHCR cuando se hace push a `master` o a un tag `v*.*.*`.
-
-Las imágenes quedan disponibles como:
-
-```text
-ghcr.io/jcares/pcc-tunnel-gateway:latest
-ghcr.io/jcares/pcc-tunnel-client:latest
-```
-
-GitHub debe tener habilitado **Settings → Actions → General → Workflow permissions → Read and write permissions**. El primer uso puede requerir cambiar la visibilidad de los paquetes desde la sección **Packages** del perfil de GitHub.
-
-Si el workflow todavía no se ha ejecutado, se pueden crear los paquetes manualmente desde un equipo con Docker y PowerShell. Crea un token personal de GitHub con `write:packages` y ejecútalo sin guardarlo en el repositorio:
-
-```powershell
-. .\publish-images.ps1
-```
-
-El script [`publish-images.ps1`](publish-images.ps1) usa `jcares` por defecto, solicita el token de GitHub de forma oculta y construye y publica las dos imágenes. Después de publicarlas, cambia sus paquetes a **Public** desde **Profile → Packages → Package settings** para que CasaOS pueda descargarlas sin autenticación.
-
-## CasaOS
-
-Para desplegar en CasaOS:
-
-1. Copiar el proyecto al servidor CasaOS.
-2. Abrir una terminal en el servidor y situarse en la carpeta del proyecto.
-3. Antes de importar el archivo, cambiar `CHANGE_ME_TO_A_SECURE_TOKEN` por un token seguro en `PCC_AUTH_TOKEN`.
-4. Importar [`docker-compose.ghcr.yml`](docker-compose.ghcr.yml) desde **App Store → Custom Install → Import**.
-
-También se puede iniciar desde una terminal después de editar el token:
-
-```bash
-docker compose -f docker-compose.ghcr.yml up -d
-```
-
-El Compose de CasaOS usa únicamente `image:`; no incluye `build:`, montajes de volumen ni interpolaciones de variables que CasaOS pueda interpretar incorrectamente. No se deben rellenar **Imagen Docker** y **Tag** con valores inventados en el instalador de contenedor individual.
-
-Definir redirección de puertos en el router si se accede desde Internet.
-
-## Protocolo
-
-Ver [`docs/API.md`](docs/API.md) para la especificación completa de mensajes.
-
-## Estado del proyecto
-
-Código fuente completo. Próximos pasos:
-- TLS entre Gateway y Cliente.
-- Panel administrativo conectado a la API del Gateway.
-- Métricas de tráfico por cliente.
-- Múltiples túneles por cliente.
+### Cliente (red privada)
+- Go 1.22+ para compilar
+- Docker opcional (CasaOS / Raspberry Pi)
+- Acceso HTTPS saliente al dominio del servidor

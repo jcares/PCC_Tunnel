@@ -1,22 +1,9 @@
 package tunnel
 
+// StatusPending y sus variantes representan el ciclo de vida de una solicitud en la cola.
 const (
-	MessageHello       = "HELLO"
-	MessageServerOK    = "SERVER_OK"
-	MessagePing        = "PING"
-	MessagePong        = "PONG"
-	MessageOpenStream  = "OPEN_STREAM"
-	MessageData        = "DATA"
-	MessageCloseStream = "CLOSE_STREAM"
-	MessageClose       = "CLOSE"
+	StatusPending    = "pending"
+	StatusProcessing = "processing"
+	StatusCompleted  = "completed"
+	StatusExpired    = "expired"
 )
-
-type Message struct {
-	Type     string `json:"type"`
-	ID       string `json:"id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Token    string `json:"token,omitempty"`
-	Data     string `json:"data,omitempty"`
-	StreamID string `json:"stream_id,omitempty"`
-	Payload  []byte `json:"payload,omitempty"`
-}

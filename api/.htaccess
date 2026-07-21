@@ -1,0 +1,15 @@
+Options -Indexes -MultiViews
+
+<Files ~ "\.(sql|env|log|yaml|yml|go|mod|sum)$">
+    Order allow,deny
+    Deny from all
+</Files>
+
+Header always set X-Content-Type-Options nosniff
+Header always set Cache-Control "no-store"
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>

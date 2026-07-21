@@ -1,10 +1,17 @@
 package tunnel
 
 import (
-	"bufio"
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -12,192 +19,249 @@ import (
 )
 
 type Client struct {
-	serverURL    string
-	id           string
-	name         string
-	token        string
-	localService string
+	baseURL         string
+	id              string
+	name            string
+	token           string
+	registrationKey string
+	localService    *url.URL
+	httpClient      *http.Client
 }
 
 type Session struct {
-	connection   net.Conn
-	encoder      *json.Encoder
-	decoder      *json.Decoder
-	writeMu      sync.Mutex
-	streamsMu    sync.RWMutex
-	streams      map[string]net.Conn
-	localService string
+	client *Client
 }
 
-func NewClient(serverURL, id, name, token string) *Client {
-	return &Client{serverURL: strings.TrimPrefix(serverURL, "tcp://"), id: id, name: name, token: token}
+type queuedRequest struct {
+	RequestID string            `json:"request_id"`
+	Method    string            `json:"method"`
+	Path      string            `json:"path"`
+	Headers   map[string]string `json:"headers"`
+	Body      string            `json:"body"`
 }
 
-func NewClientWithLocalService(serverURL, id, name, token, localService string) *Client {
-	client := NewClient(serverURL, id, name, token)
-	client.localService = localService
-	return client
+type tunnelResponse struct {
+	RequestID  string            `json:"request_id"`
+	StatusCode int               `json:"status_code"`
+	Headers    map[string]string `json:"headers"`
+	Body       string            `json:"body"`
+}
+
+func NewClientWithLocalService(serverURL, id, name, token, registrationKey, localService string, verifyTLS bool) (*Client, error) {
+	baseURL := strings.TrimRight(serverURL, "/")
+	parsedLocal, err := url.Parse(localService)
+	if err != nil || parsedLocal.Scheme == "" || parsedLocal.Host == "" {
+		return nil, fmt.Errorf("servicio local inválido: %q", localService)
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: !verifyTLS} //nolint:gosec
+	return &Client{
+		baseURL: baseURL, id: id, name: name, token: token,
+		registrationKey: registrationKey, localService: parsedLocal,
+		httpClient: &http.Client{Timeout: 45 * time.Second, Transport: transport},
+	}, nil
 }
 
 func (c *Client) Connect() (*Session, error) {
-	connection, err := net.Dial("tcp", c.serverURL)
+	if c.id == "" || c.name == "" || len(c.token) < 16 {
+		return nil, fmt.Errorf("client.id, client.name y client.token son obligatorios")
+	}
+	if c.registrationKey != "" {
+		payload, _ := json.Marshal(map[string]string{"client_id": c.id, "name": c.name, "token": c.token})
+		req, err := http.NewRequest(http.MethodPost, c.endpoint("register.php"), bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-PCC-Registration-Key", c.registrationKey)
+		if _, err := c.do(req); err != nil {
+			return nil, err
+		}
+	}
+	if err := c.heartbeat(context.Background()); err != nil {
+		return nil, err
+	}
+	return &Session{client: c}, nil
+}
+
+func (c *Client) endpoint(path string) string {
+	return c.baseURL + "/" + path
+}
+
+func (c *Client) signedRequest(ctx context.Context, path string, body []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(path), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	session := &Session{
-		connection:   connection,
-		encoder:      json.NewEncoder(connection),
-		decoder:      json.NewDecoder(bufio.NewReader(connection)),
-		streams:      make(map[string]net.Conn),
-		localService: c.localService,
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+	mac := hmac.New(sha256.New, []byte(c.token))
+	_, _ = mac.Write([]byte(timestamp + "\n"))
+	_, _ = mac.Write(body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-PCC-Client-ID", c.id)
+	req.Header.Set("X-PCC-Token", c.token)
+	req.Header.Set("X-PCC-Timestamp", timestamp)
+	req.Header.Set("X-PCC-Signature", hex.EncodeToString(mac.Sum(nil)))
+	return req, nil
+}
+
+func (c *Client) heartbeat(ctx context.Context) error {
+	req, err := c.signedRequest(ctx, "heartbeat.php", []byte("{}"))
+	if err != nil {
+		return err
 	}
-	if err := session.handshake(c.id, c.name, c.token); err != nil {
-		connection.Close()
+	_, err = c.do(req)
+	return err
+}
+
+func (c *Client) poll(ctx context.Context) (*queuedRequest, error) {
+	req, err := c.signedRequest(ctx, "poll.php", []byte("{}"))
+	if err != nil {
 		return nil, err
 	}
-	return session, nil
+	data, err := c.do(req)
+	if err != nil || data == nil {
+		return nil, err
+	}
+	var queued queuedRequest
+	if err := json.Unmarshal(data, &queued); err != nil {
+		return nil, err
+	}
+	return &queued, nil
 }
 
-func (s *Session) send(message Message) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	return s.encoder.Encode(message)
-}
-
-func (s *Session) handshake(id, name, token string) error {
-	if err := s.send(Message{Type: MessageHello, ID: id, Name: name, Token: token}); err != nil {
+func (c *Client) respond(ctx context.Context, payload tunnelResponse) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
 		return err
 	}
-	var response Message
-	if err := s.decoder.Decode(&response); err != nil {
+	req, err := c.signedRequest(ctx, "response.php", body)
+	if err != nil {
 		return err
 	}
-	if response.Type != MessageServerOK {
-		return fmt.Errorf("respuesta inesperada del Gateway: %s", response.Type)
-	}
-	return nil
+	_, err = c.do(req)
+	return err
 }
 
-// RunHeartbeat mantiene la sesión activa y despacha tráfico de túnel.
+func (c *Client) do(req *http.Request) ([]byte, error) {
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("servidor respondió %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return body, nil
+}
+
 func (s *Session) RunHeartbeat(interval time.Duration) error {
 	if interval <= 0 {
-		interval = time.Second
+		interval = 5 * time.Second
 	}
-	readErr := make(chan error, 1)
-	go func() { readErr <- s.readLoop() }()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if err := s.connection.SetReadDeadline(time.Now().Add(interval * 2)); err != nil {
-				return err
-			}
-			if err := s.send(Message{Type: MessagePing}); err != nil {
-				return err
-			}
-		case err := <-readErr:
-			return err
-		}
-	}
-}
-
-func (s *Session) readLoop() error {
-	for {
-		var message Message
-		if err := s.decoder.Decode(&message); err != nil {
-			return err
-		}
-		switch message.Type {
-		case MessagePong:
-		case MessageOpenStream:
-			s.openLocalStream(message.StreamID)
-		case MessageData:
-			s.streamsMu.RLock()
-			local := s.streams[message.StreamID]
-			s.streamsMu.RUnlock()
-			if local == nil {
-				continue
-			}
-			if _, err := local.Write(message.Payload); err != nil {
-				s.closeLocalStream(message.StreamID, true)
-			}
-		case MessageCloseStream:
-			s.closeLocalStream(message.StreamID, false)
-		case MessageClose:
-			return net.ErrClosed
-		}
-	}
-}
-
-func (s *Session) openLocalStream(id string) {
-	if id == "" || s.localService == "" {
-		_ = s.send(Message{Type: MessageCloseStream, StreamID: id})
-		return
-	}
-	address, err := localAddress(s.localService)
-	if err != nil {
-		_ = s.send(Message{Type: MessageCloseStream, StreamID: id})
-		return
-	}
-	local, err := net.Dial("tcp", address)
-	if err != nil {
-		_ = s.send(Message{Type: MessageCloseStream, StreamID: id})
-		return
-	}
-	s.streamsMu.Lock()
-	s.streams[id] = local
-	s.streamsMu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errs := make(chan error, 1)
+	var once sync.Once
+	fail := func(err error) { once.Do(func() { errs <- err }) }
 	go func() {
-		buffer := make([]byte, 32*1024)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		for {
-			n, readErr := local.Read(buffer)
-			if n > 0 {
-				payload := append([]byte(nil), buffer[:n]...)
-				if err := s.send(Message{Type: MessageData, StreamID: id, Payload: payload}); err != nil {
-					break
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.client.heartbeat(ctx); err != nil {
+					fail(err)
+					return
 				}
 			}
-			if readErr != nil {
-				break
-			}
 		}
-		s.closeLocalStream(id, true)
 	}()
+	for {
+		select {
+		case err := <-errs:
+			return err
+		default:
+		}
+		queued, err := s.client.poll(ctx)
+		if err != nil {
+			return err
+		}
+		if queued == nil {
+			continue
+		}
+		if err := s.process(ctx, *queued); err != nil {
+			return err
+		}
+	}
 }
 
-func (s *Session) closeLocalStream(id string, notify bool) {
-	s.streamsMu.Lock()
-	local, ok := s.streams[id]
-	if ok {
-		delete(s.streams, id)
+func (s *Session) process(ctx context.Context, queued queuedRequest) error {
+	body, err := base64.StdEncoding.DecodeString(queued.Body)
+	if err != nil {
+		return s.client.respond(ctx, tunnelResponse{RequestID: queued.RequestID, StatusCode: http.StatusBadRequest})
 	}
-	s.streamsMu.Unlock()
-	if ok {
-		_ = local.Close()
+	target := *s.client.localService
+	if parsed, err := url.Parse(queued.Path); err == nil {
+		target.Path = parsed.Path
+		target.RawQuery = parsed.RawQuery
 	}
-	if notify {
-		_ = s.send(Message{Type: MessageCloseStream, StreamID: id})
+	req, err := http.NewRequestWithContext(ctx, queued.Method, target.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
 	}
+	for name, value := range queued.Headers {
+		if !hopByHopHeader(name) {
+			req.Header.Set(name, value)
+		}
+	}
+	resp, err := s.client.httpClient.Do(req)
+	if err != nil {
+		return s.client.respond(ctx, tunnelResponse{
+			RequestID:  queued.RequestID,
+			StatusCode: http.StatusBadGateway,
+			Body:       base64.StdEncoding.EncodeToString([]byte(err.Error())),
+		})
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return err
+	}
+	headers := make(map[string]string, len(resp.Header))
+	for name, values := range resp.Header {
+		if len(values) > 0 && !hopByHopHeader(name) {
+			headers[name] = values[0]
+		}
+	}
+	return s.client.respond(ctx, tunnelResponse{
+		RequestID:  queued.RequestID,
+		StatusCode: resp.StatusCode,
+		Headers:    headers,
+		Body:       base64.StdEncoding.EncodeToString(respBody),
+	})
 }
 
-func localAddress(value string) (string, error) {
-	if !strings.Contains(value, "://") {
-		return value, nil
+func hopByHopHeader(name string) bool {
+	switch strings.ToLower(name) {
+	case "connection", "content-length", "host", "keep-alive",
+		"proxy-authenticate", "proxy-authorization", "te",
+		"trailer", "transfer-encoding", "upgrade":
+		return true
+	default:
+		return false
 	}
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Host == "" {
-		return "", fmt.Errorf("servicio local inválido: %q", value)
-	}
-	return parsed.Host, nil
 }
 
 func (s *Session) Close() error {
-	s.streamsMu.Lock()
-	for id, local := range s.streams {
-		_ = local.Close()
-		delete(s.streams, id)
-	}
-	s.streamsMu.Unlock()
-	return s.connection.Close()
+	return nil
 }

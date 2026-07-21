@@ -14,46 +14,42 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if gatewayAddress := os.Getenv("PCC_GATEWAY_ADDR"); gatewayAddress != "" {
-		cfg.Server.URL = gatewayAddress
+	if serverURL := os.Getenv("PCC_SERVER_URL"); serverURL != "" {
+		cfg.Server.URL = serverURL
 	}
 	if token := os.Getenv("PCC_AUTH_TOKEN"); token != "" {
 		cfg.Client.Token = token
 	}
+	if registrationKey := os.Getenv("PCC_REGISTRATION_KEY"); registrationKey != "" {
+		cfg.Client.RegistrationKey = registrationKey
+	}
+	if localService := os.Getenv("PCC_PROXY_LOCAL"); localService != "" {
+		cfg.Proxy.Local = localService
+	}
 
 	logger, closeLog, err := newLogger(cfg.Log.File)
 	if err != nil {
-		log.Printf("No se pudo abrir log en %s, usando stdout: %v", cfg.Log.File, err)
 		logger = log.Default()
 		closeLog = func() {}
 	}
 	defer closeLog()
 
-	logger.Printf("[INFO] PCC_Tunnel Client")
-	logger.Printf("[INFO] Conectando a %s como %s (id=%s)", cfg.Server.URL, cfg.Client.Name, cfg.Client.ID)
-
-	client := tunnel.NewClientWithLocalService(
-		cfg.Server.URL,
-		cfg.Client.ID,
-		cfg.Client.Name,
-		cfg.Client.Token,
-		cfg.Proxy.Local,
+	client, err := tunnel.NewClientWithLocalService(
+		cfg.Server.URL, cfg.Client.ID, cfg.Client.Name,
+		cfg.Client.Token, cfg.Client.RegistrationKey,
+		cfg.Proxy.Local, cfg.SSL.Verify,
 	)
+	if err != nil {
+		logger.Fatal(err)
+	}
 
-	baseReconnectDelay := time.Duration(cfg.Client.Reconnect) * time.Second
+	reconnectDelay := time.Duration(cfg.Client.Reconnect) * time.Second
 	heartbeatInterval := time.Duration(cfg.Client.Heartbeat) * time.Second
-	if baseReconnectDelay <= 0 {
-		baseReconnectDelay = 5 * time.Second
-	}
-	if heartbeatInterval <= 0 {
-		heartbeatInterval = 5 * time.Second
-	}
 
-	reconnectDelay := baseReconnectDelay
 	for {
 		session, err := client.Connect()
 		if err != nil {
-			logger.Printf("[WARN] Gateway no disponible: %v — reintentando en %s", err, reconnectDelay)
+			logger.Printf("[WARN] Servidor HTTPS no disponible: %v; reintentando en %s", err, reconnectDelay)
 			time.Sleep(reconnectDelay)
 			if reconnectDelay < time.Minute {
 				reconnectDelay *= 2
@@ -63,14 +59,11 @@ func main() {
 			}
 			continue
 		}
-
-		logger.Printf("[INFO] Connected Gateway")
-		logger.Printf("[INFO] Client registered")
-		reconnectDelay = baseReconnectDelay
-
+		logger.Printf("[INFO] Cliente %s conectado al servidor HTTPS", cfg.Client.ID)
+		reconnectDelay = time.Duration(cfg.Client.Reconnect) * time.Second
 		err = session.RunHeartbeat(heartbeatInterval)
-		session.Close()
-		logger.Printf("[WARN] Conexión perdida con Gateway: %v", err)
+		_ = session.Close()
+		logger.Printf("[WARN] Sesión finalizada: %v", err)
 		time.Sleep(reconnectDelay)
 	}
 }
