@@ -4,6 +4,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../api/bootstrap.php';
 
 session_start();
+if (!isset($_SESSION['admin_csrf'])) {
+    $_SESSION['admin_csrf'] = bin2hex(random_bytes(32));
+}
 
 function is_logged_in(): bool
 {
@@ -19,10 +22,11 @@ function require_login(): void
 }
 
 $section = $_GET['section'] ?? 'dashboard';
-$db = database();
+$db = null;
 
 // --- Auth ---
 if ($section === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $db = database();
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
     $statement = $db->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
@@ -44,6 +48,7 @@ if ($section === 'logout') {
 
 if ($section !== 'login') {
     require_login();
+    $db = database();
 }
 
 // --- Data queries ---
@@ -100,6 +105,17 @@ form button{background:#0284c7;color:#fff;border:none;padding:10px 24px;border-r
 .login-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:40px;width:340px}
 .login-card h1{margin-bottom:24px;font-size:18px;color:#f1f5f9}
 .error{color:#f87171;font-size:13px;margin-bottom:12px}
+.log-context{font-size:12px;font-family:monospace;max-width:300px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-bottom:24px}
+.admin-card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px}
+.admin-card h2{font-size:15px;color:#f1f5f9;margin-bottom:16px}
+.admin-card p{font-size:13px;color:#94a3b8;margin-bottom:8px}
+.admin-card strong{color:#e2e8f0}
+.admin-form{max-width:520px}
+.admin-form label{display:block;font-size:12px;color:#94a3b8;margin:12px 0 6px}
+.admin-form input,.admin-form select{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px;width:100%}
+.admin-form button{margin-top:16px}
+.admin-message{font-size:13px;color:#6ee7b7;margin-top:12px;min-height:18px}
 </style>
 </head>
 <body>
@@ -119,7 +135,7 @@ form button{background:#0284c7;color:#fff;border:none;padding:10px 24px;border-r
 <aside>
 <h2>PCC_Tunnel</h2>
 <?php
-$nav = ['dashboard' => 'Dashboard', 'clients' => 'Clientes', 'domains' => 'Dominios', 'logs' => 'Logs', 'users' => 'Usuarios'];
+$nav = ['dashboard' => 'Dashboard', 'clients' => 'Clientes', 'domains' => 'Dominios', 'logs' => 'Logs', 'users' => 'Usuarios', 'admin' => 'Administración'];
 foreach ($nav as $key => $label):
 ?>
 <a href="?section=<?= h($key) ?>" class="<?= $section === $key ? 'active' : '' ?>"><?= h($label) ?></a>
@@ -173,7 +189,7 @@ foreach ($nav as $key => $label):
 <td><span class="badge <?= $log['level'] === 'error' ? 'badge-red' : ($log['level'] === 'warn' ? 'badge-gray' : 'badge-green') ?>"><?= h((string) $log['level']) ?></span></td>
 <td><?= h((string) $log['event']) ?></td>
 <td><?= $log['client_id'] ? h((string) $log['client_id']) : '—' ?></td>
-<td style="font-size:12px;font-family:monospace;max-width:300px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"><?= h((string) ($log['context'] ?? '{}')) ?></td>
+<td class="log-context"><?= h((string) ($log['context'] ?? '{}')) ?></td>
 </tr>
 <?php endforeach ?>
 </table>
@@ -189,6 +205,25 @@ foreach ($nav as $key => $label):
 </tr>
 <?php endforeach ?>
 </table>
+<?php elseif ($section === 'admin'): ?>
+<h1>Administración</h1>
+<div class="admin-grid">
+<div class="admin-card"><h2>Estado del sistema</h2><p>Estado: <strong id="admin-health-status">Consultando…</strong></p><p>Base de datos: <strong id="admin-health-db">—</strong></p><p>Clientes online: <strong id="admin-health-clients">—</strong></p><p>Heartbeats recientes: <strong id="admin-health-heartbeats">—</strong></p><p>Disco libre: <strong id="admin-health-disk">—</strong></p><p>Memoria disponible: <strong id="admin-health-memory">—</strong></p></div>
+<div class="admin-card"><h2>Actualizaciones</h2><p>Canal: <strong id="admin-update-channel">—</strong></p><p>Versión disponible: <strong id="admin-update-version">Consultando…</strong></p><p id="admin-update-message"></p></div>
+</div>
+<div class="admin-card admin-form"><h2>Configuración</h2><form id="admin-settings-form"><label for="admin-channel">Canal de actualización</label><select id="admin-channel" name="update_channel"><option value="stable">stable</option><option value="beta">beta</option><option value="dev">dev</option></select><label for="admin-repository">Repositorio GitHub</label><input id="admin-repository" name="github_repository" maxlength="255" placeholder="organización/repositorio"><label for="admin-interval">Intervalo de comprobación (segundos)</label><input id="admin-interval" name="update_check_interval" type="number" min="60" max="604800" required><button type="submit">Guardar configuración</button><p class="admin-message" id="admin-settings-message" role="status"></p></form></div>
+<script>
+(function () {
+    const csrf = <?= json_encode($_SESSION['admin_csrf'], JSON_UNESCAPED_SLASHES) ?>;
+    const api = (action) => fetch('../api/admin.php?action=' + encodeURIComponent(action), {headers: {'Accept': 'application/json'}}).then((response) => response.json().then((data) => { if (!response.ok) throw new Error(data.error || 'request_failed'); return data; }));
+    const text = (id, value) => { document.getElementById(id).textContent = value === null || value === undefined ? '—' : value; };
+    function loadHealth() { api('health').then((data) => { text('admin-health-status', data.status); text('admin-health-db', data.database); text('admin-health-clients', data.clients_online); text('admin-health-heartbeats', data.heartbeats_recent); text('admin-health-disk', data.disk && data.disk.free_bytes !== null ? Math.round(data.disk.free_bytes / 1073741824 * 10) / 10 + ' GB' : 'No disponible'); text('admin-health-memory', data.memory && data.memory.available_bytes !== null ? Math.round(data.memory.available_bytes / 1048576) + ' MB' : 'No disponible'); }).catch(() => text('admin-health-status', 'No disponible')); }
+    function loadSettings() { api('settings').then((data) => { const settings = data.settings; document.getElementById('admin-channel').value = settings.update_channel; document.getElementById('admin-repository').value = settings.github_repository; document.getElementById('admin-interval').value = settings.update_check_interval; text('admin-update-channel', settings.update_channel); }); }
+    function loadUpdates() { api('updates').then((data) => { text('admin-update-version', data.update.version || 'No disponible'); text('admin-update-message', data.update.message || (data.update.available ? 'Metadatos consultados desde GitHub.' : '')); }).catch(() => text('admin-update-version', 'No disponible')); }
+    document.getElementById('admin-settings-form').addEventListener('submit', function (event) { event.preventDefault(); const form = new FormData(event.currentTarget); fetch('../api/admin.php?action=settings', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'Accept': 'application/json'}, body: JSON.stringify({update_channel: form.get('update_channel'), github_repository: form.get('github_repository'), update_check_interval: Number(form.get('update_check_interval')), wizard_completed: false})}).then((response) => response.json().then((data) => { if (!response.ok) throw new Error(data.error || 'save_failed'); return data; })).then(() => { text('admin-settings-message', 'Configuración guardada.'); text('admin-update-channel', document.getElementById('admin-channel').value); loadUpdates(); }).catch((error) => text('admin-settings-message', 'No se pudo guardar: ' + error.message)); });
+    loadHealth(); loadSettings(); loadUpdates();
+}());
+</script>
 <?php endif ?>
 </main>
 <?php endif ?>

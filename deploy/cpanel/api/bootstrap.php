@@ -3,6 +3,15 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 
+$pccConfig = [];
+$configPath = __DIR__ . '/../config.php';
+if (is_file($configPath)) {
+    $loadedConfig = require $configPath;
+    if (is_array($loadedConfig)) {
+        $pccConfig = $loadedConfig;
+    }
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'PccTunnel\\';
     if (!str_starts_with($class, $prefix)) {
@@ -17,6 +26,10 @@ spl_autoload_register(static function (string $class): void {
 
 function env_value(string $name, ?string $default = null): ?string
 {
+    global $pccConfig;
+    if (array_key_exists($name, $pccConfig) && $pccConfig[$name] !== '') {
+        return (string) $pccConfig[$name];
+    }
     $value = getenv($name);
     return $value === false || $value === '' ? $default : $value;
 }
