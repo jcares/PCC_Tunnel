@@ -9,12 +9,12 @@ services:
       PCC_PUBLIC_ADDR: ":8081"
       PCC_AUTH_TOKEN: "CHANGE_ME_TO_A_SECURE_TOKEN"
       PCC_LOG_FILE: "/app/logs/gateway.log"
-    restart: always
+    restart: unless-stopped
 
   client:
     image: ghcr.io/jcares/pcc-tunnel-client:latest
     environment:
       PCC_GATEWAY_ADDR: "gateway:8080"
-    restart: always
+    restart: unless-stopped
     depends_on:
       - gateway
