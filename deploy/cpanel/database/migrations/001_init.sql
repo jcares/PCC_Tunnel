@@ -1,0 +1,61 @@
+CREATE TABLE IF NOT EXISTS clients (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    client_id VARCHAR(128) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    token_hash VARCHAR(255) NOT NULL,
+    status ENUM('online', 'offline', 'disabled') NOT NULL DEFAULT 'offline',
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    last_seen_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS requests (
+    id CHAR(36) PRIMARY KEY,
+    client_id VARCHAR(128) NOT NULL,
+    method VARCHAR(16) NOT NULL,
+    path TEXT NOT NULL,
+    headers JSON NOT NULL,
+    body MEDIUMBLOB NOT NULL,
+    status ENUM('pending', 'processing', 'completed', 'failed', 'expired') NOT NULL DEFAULT 'pending',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    claimed_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    INDEX requests_client_status (client_id, status, created_at),
+    CONSTRAINT requests_client_fk FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS responses (
+    request_id CHAR(36) PRIMARY KEY,
+    status_code SMALLINT UNSIGNED NOT NULL,
+    headers JSON NOT NULL,
+    body MEDIUMBLOB NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT responses_request_fk FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS logs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    level VARCHAR(16) NOT NULL,
+    event VARCHAR(128) NOT NULL,
+    client_id VARCHAR(128) NULL,
+    context JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX logs_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS domains (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    hostname VARCHAR(255) NOT NULL UNIQUE,
+    client_id VARCHAR(128) NOT NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT domains_client_fk FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
