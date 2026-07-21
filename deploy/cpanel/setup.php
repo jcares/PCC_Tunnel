@@ -25,9 +25,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $dbName = setup_value('db_name');
     $dbUser = setup_value('db_user');
     $dbPass = (string) ($_POST['db_pass'] ?? '');
+    $grantUser = setup_value('grant_user');
+    $grantPass = (string) ($_POST['grant_pass'] ?? '');
     $adminEmail = strtolower(setup_value('admin_email'));
     $adminPassword = (string) ($_POST['admin_password'] ?? '');
     $adminPasswordConfirm = (string) ($_POST['admin_password_confirm'] ?? '');
+    $updateChannel = setup_value('update_channel') ?: 'stable';
+    $githubRepository = setup_value('github_repository');
+    $updateCheckInterval = setup_value('update_check_interval') ?: '86400';
 
     if ($host === '' || strlen($host) > 253 || !preg_match('/^[a-zA-Z0-9.:%_-]+$/', $host)) {
         $errors[] = 'Indica un host de base de datos válido.';
@@ -49,6 +54,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!hash_equals($adminPassword, $adminPasswordConfirm)) {
         $errors[] = 'Las contraseñas del administrador no coinciden.';
+    }
+    if (!in_array($updateChannel, ['stable', 'beta', 'dev'], true)) {
+        $errors[] = 'Indica un canal de actualización válido.';
+    }
+    if (strlen($githubRepository) > 255 || ($githubRepository !== '' && !preg_match('/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/', $githubRepository))) {
+        $errors[] = 'Indica un repositorio de GitHub válido.';
+    }
+    if (!ctype_digit($updateCheckInterval) || (int) $updateCheckInterval < 60 || (int) $updateCheckInterval > 604800) {
+        $errors[] = 'El intervalo de actualización debe estar entre 60 y 604800 segundos.';
     }
 
     if ($errors === []) {
@@ -89,6 +103,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $statement = $pdo->prepare('INSERT INTO users (email, password_hash) VALUES (?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)');
             $statement->execute([$adminEmail, password_hash($adminPassword, PASSWORD_DEFAULT)]);
+            $statement = $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)');
+            foreach ([
+                'update_channel' => $updateChannel,
+                'github_repository' => $githubRepository,
+                'update_check_interval' => $updateCheckInterval,
+                'wizard_completed' => '1',
+            ] as $key => $value) {
+                $statement->execute([$key, $value]);
+            }
             $pdo->commit();
 
             $installationStep = 'configuration';
@@ -129,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
 .setup-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:32px;width:100%;max-width:560px;box-shadow:0 18px 50px rgba(0,0,0,.2)}
-h1{font-size:22px;color:#f1f5f9;margin-bottom:8px}.intro{font-size:14px;color:#94a3b8;margin-bottom:24px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.field{display:flex;flex-direction:column}.field-wide{grid-column:1/-1}label{font-size:12px;color:#94a3b8;margin:12px 0 6px}input{background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px;width:100%}button{background:#0284c7;color:#fff;border:0;padding:11px 24px;border-radius:6px;font-size:14px;cursor:pointer;margin-top:24px}.error{color:#fca5a5;background:#450a0a;border:1px solid #7f1d1d;border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:16px}.success{color:#6ee7b7;background:#064e3b;border:1px solid #047857;border-radius:6px;padding:12px;font-size:14px}.success a{color:#a7f3d0}.hint{font-size:12px;color:#64748b;margin-top:5px}@media(max-width:520px){.fields{display:block}}
+h1{font-size:22px;color:#f1f5f9;margin-bottom:8px}.intro{font-size:14px;color:#94a3b8;margin-bottom:24px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.field{display:flex;flex-direction:column}.field-wide{grid-column:1/-1}label{font-size:12px;color:#94a3b8;margin:12px 0 6px}input,select{background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px;width:100%}button{background:#0284c7;color:#fff;border:0;padding:11px 24px;border-radius:6px;font-size:14px;cursor:pointer;margin-top:24px}.error{color:#fca5a5;background:#450a0a;border:1px solid #7f1d1d;border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:16px}.success{color:#6ee7b7;background:#064e3b;border:1px solid #047857;border-radius:6px;padding:12px;font-size:14px}.success a{color:#a7f3d0}.hint{font-size:12px;color:#64748b;margin-top:5px}@media(max-width:520px){.fields{display:block}}
 </style>
 </head>
 <body>
@@ -149,6 +172,9 @@ h1{font-size:22px;color:#f1f5f9;margin-bottom:8px}.intro{font-size:14px;color:#9
 <div class="field field-wide"><label for="admin_email">Correo del administrador</label><input id="admin_email" name="admin_email" type="email" value="<?= setup_h(setup_value('admin_email')) ?>" maxlength="254" required></div>
 <div class="field"><label for="admin_password">Contraseña del administrador</label><input id="admin_password" name="admin_password" type="password" minlength="12" maxlength="512" required><span class="hint">Mínimo: 12 caracteres.</span></div>
 <div class="field"><label for="admin_password_confirm">Repite la contraseña</label><input id="admin_password_confirm" name="admin_password_confirm" type="password" minlength="12" maxlength="512" required></div>
+<div class="field field-wide"><label for="update_channel">Canal de actualización</label><select id="update_channel" name="update_channel"><option value="stable" <?= setup_value('update_channel') === 'beta' || setup_value('update_channel') === 'dev' ? '' : 'selected' ?>>stable</option><option value="beta" <?= setup_value('update_channel') === 'beta' ? 'selected' : '' ?>>beta</option><option value="dev" <?= setup_value('update_channel') === 'dev' ? 'selected' : '' ?>>dev</option></select></div>
+<div class="field field-wide"><label for="github_repository">Repositorio GitHub</label><input id="github_repository" name="github_repository" value="<?= setup_h(setup_value('github_repository')) ?>" maxlength="255" placeholder="organización/repositorio"><span class="hint">Opcional. Se usa para consultar nuevas versiones.</span></div>
+<div class="field field-wide"><label for="update_check_interval">Intervalo de comprobación (segundos)</label><input id="update_check_interval" name="update_check_interval" type="number" min="60" max="604800" value="<?= setup_h(setup_value('update_check_interval') ?: '86400') ?>" required></div>
 </div>
 <button type="submit">Instalar y crear administrador</button>
 </form>
